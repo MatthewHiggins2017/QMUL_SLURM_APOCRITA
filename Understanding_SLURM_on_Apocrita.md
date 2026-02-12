@@ -2,7 +2,7 @@
 
 The goal of this document is to act as a guided tutorial and bring you up to speed using SLURM on Apocrita. 
 
----
+-----
 
 # Precursors 
 
@@ -160,7 +160,6 @@ module list
 # Unload everything
 module purge
 ```
-
 ## Module Naming Conventions
 
 Modules follow the `NAME/VERSION` convention. Spack-generated modules also include the compiler:
@@ -247,21 +246,37 @@ echo "Job completed at: $(date)"
 
 ## Example: Multi-Core Job
 
-For applications that can use multiple threads:
+The script below demonstrates how to utilise multiple cores to accelerate an analysis. In this example, Oxford Nanopore long-read data is mapped to the T4 Phage reference genome. 
 
 ```bash
 #!/bin/bash
 #SBATCH -J multi_core_job     # Job name
 #SBATCH -o %x.o%j             # Output file
-#SBATCH -n 8                  # Request 8 cores
+#SBATCH -n 12                  # Request 12 cores
 #SBATCH -t 2:0:0              # Request 2 hours runtime
-#SBATCH --mem-per-cpu=4G      # 4GB per core = 32GB total
+#SBATCH --mem-per-cpu=4G      # 4GB per core = 48GB total
 
 # Load required modules
 module load samtools
+module load minimap2 
 
-# Run application using $SLURM_NTASKS for thread count
-samtools sort -@ ${SLURM_NTASKS} input.bam -o output.sorted.bam
+
+# Create Temporary Directory for this job on scratch 
+mkdir -p /gpfs/scratch/${USER}/SLURM_Example_2
+
+# Move to the temporary directory 
+cd /gpfs/scratch/${USER}/SLURM_Example_2
+
+# Download Reference
+wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/836/945/GCF_000836945.1_ViralProj14044/GCF_000836945.1_ViralProj14044_genomic.fna.gz
+
+gunzip GCF_000836945.1_ViralProj14044_genomic.fna.gz
+
+# Download Reads 
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR112/098/SRR11283998/SRR11283998_1.fastq.gz
+
+# Map reads to reference using minimap2
+minimap2 -x map-ont -t ${SLURM_NTASKS} -a GCF_000836945.1_ViralProj14044_genomic.fna SRR11283998_1.fastq.gz | samtools view -bS - > aligned.bam
 
 echo "Job completed successfully"
 ```
@@ -283,6 +298,8 @@ Upon successful submission, you'll see:
 Submitted batch job 1234567
 ```
 
+Copy and paste the example scripts into your Apocrita user space. If you prefer using the nano text editor, load it first with `module load nano`. Then, use the `sbatch` command to run each script individually and verify they work as expected.  
+
 ## Checking Job Status
 
 ```bash
@@ -292,8 +309,10 @@ squeue --me
 # View all jobs (can be very long!)
 squeue
 
-# View detailed job information
+# View detailed job information - Note change the number ot reflect your actual job number. 
+
 scontrol show job 1234567
+
 ```
 
 ## Understanding Output Files
@@ -322,15 +341,21 @@ Using the `%x` (job name) and `%j` (job ID) wildcards:
 ### Memory Requests
 
 - `--mem-per-cpu` must be an integer (e.g., use `--mem-per-cpu=7500M` not `--mem-per-cpu=7.5G`)
-- Request only what you need – over-requesting wastes resources and increases queue time
+- Request only what you need – over-requesting wastes resources and increases queue time. 
 
 ### Runtime Estimates
 
-- Estimate generously but reasonably
+- Estimate generously but reasonably. 
+
 - Jobs exceeding their time limit are **killed immediately**
+
 - Use `sacct -j <jobid>` to check how long previous jobs took
 
+- If you cannot remember the job ID, you can use the command `sacct -u $USER` to get a table of all your prior jobs. 
+
+
 ---
+
 
 # Array Jobs
 
@@ -368,11 +393,19 @@ echo "This is task ${SLURM_ARRAY_TASK_ID} of array job ${SLURM_ARRAY_JOB_ID}"
 
 ## Example: Processing Multiple FASTQ Files with minimap2
 
+
 ### Step 1: Create a list of input files
 
+For this example we are going to provide a list of ENA accessions again corresponding to ONT data for the T4 bacteriophage. 
+
+
 ```bash
-ls -1 /path/to/fastq/*.fastq.gz > sample_list.txt
-wc -l sample_list.txt  # Check number of files
+
+echo """ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR299/019/SRR29929219/SRR29929219_1.fastq.gz
+ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR279/076/SRR27945376/SRR27945376_1.fastq.gz
+ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR278/092/SRR27873192/SRR27873192_1.fastq.gz
+ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR278/093/SRR27873193/SRR27873193_1.fastq.gz""" >> sample_list.txt 
+
 ```
 
 ### Step 2: Create the array job script
@@ -380,49 +413,60 @@ wc -l sample_list.txt  # Check number of files
 ```bash
 #!/bin/bash
 #SBATCH -J minimap2_array
-#SBATCH -o logs/%x.o%A.%a
-#SBATCH -e logs/%x.e%A.%a
+#SBATCH -o array_logs/%x.o%A.%a
+#SBATCH -e array_logs/%x.e%A.%a
 #SBATCH -n 8
 #SBATCH --mem-per-cpu=4G
 #SBATCH -t 4:0:0
-#SBATCH -a 1-50%10            # 50 samples, max 10 running at once
+#SBATCH -a 1-4                # 4 samples (matches number of lines in sample_list.txt)
 
-# Load required module
+# Load required modules
 module load minimap2
+module load samtools
+
+# Define working directory
+WORK_DIR="/gpfs/scratch/${USER}/SLURM_Example_2"
+mkdir -p ${WORK_DIR}
 
 # Reference genome
-REFERENCE="/path/to/reference.fasta"
+REFERENCE="${WORK_DIR}/GCF_000836945.1_ViralProj14044_genomic.fna"
 
-# Get the input file for this task
-INPUT_FILE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" sample_list.txt)
+# Get the FTP URL for this task
+FTP_URL=$(sed -n "${SLURM_ARRAY_TASK_ID}p" sample_list.txt)
 
-# Extract sample name (without path and extension)
-SAMPLE=$(basename ${INPUT_FILE} .fastq.gz)
+# Extract sample name from URL (e.g., SRR29929219_1)
+SAMPLE=$(basename ${FTP_URL} .fastq.gz)
 
-# Define output
-OUTPUT="/gpfs/scratch/${USER}/alignments/${SAMPLE}.sam"
+# Define paths
+FASTQ_FILE="${WORK_DIR}/${SAMPLE}.fastq.gz"
+OUTPUT="${WORK_DIR}/${SAMPLE}.bam"
 
-# Run minimap2
+# Download FASTQ file
+echo "Downloading ${SAMPLE}..."
+wget -O ${FASTQ_FILE} ${FTP_URL}
+
+# Run minimap2 and convert to BAM
 echo "Processing ${SAMPLE}..."
-minimap2 -t ${SLURM_NTASKS} -ax map-ont ${REFERENCE} ${INPUT_FILE} > ${OUTPUT}
+minimap2 -t ${SLURM_NTASKS} -ax map-ont ${REFERENCE} ${FASTQ_FILE} | samtools view -bS - > ${OUTPUT}
 
 echo "Completed ${SAMPLE}"
 ```
 
+To submit the job, use `sbatch` as before. To view the logs for each array task, check the `array_logs` folder specified in the job script header.
+
+
 ## Managing Array Jobs
 
+
 ```bash
-# Cancel specific tasks (e.g., tasks 20-60 of job 3388)
-scancel 3388_[20-60]
+# Cancel specific tasks (e.g., tasks 2-3 of job 3388)
+scancel 3388_[2-3]
 
 # Hold specific tasks
-scontrol hold 3388_20-60
+scontrol hold 3388_4
 
 # Release held tasks
-scontrol release 3388_20-60
-
-# Resubmit failed tasks only
-sbatch -a 5,17,35 my_array_script.sh
+scontrol release 3388_4
 ```
 
 📖 **Documentation:** https://slurm-docs.hpc.qmul.ac.uk/using/arrays/
