@@ -49,6 +49,7 @@ SLURM handles three key functions:
 | `scancel --me` | Cancel all your jobs |
 | `salloc` | Request an interactive session |
 | `sacct -j jobid` | View accounting info for a completed job |
+| `sacct -u $USER` | View complete list of prior submitted jobs | 
 
 ---
 
@@ -498,11 +499,11 @@ Use the `--gres=gpu:<count>` option:
 #SBATCH --gres=gpu:1         # Request 1 GPU
 ```
 
-## Example: GPU Job for Nanopore Basecalling with Dorado
+## Example: GPU Job Short -- Need to come up with example for this! 
 
 ```bash
 #!/bin/bash
-#SBATCH -J dorado_basecall
+#SBATCH -J GPU_Test_Run
 #SBATCH -o %x.o%j
 #SBATCH -e %x.e%j
 #SBATCH -p gpushort           # Use gpushort for testing
@@ -512,21 +513,7 @@ Use the `--gres=gpu:<count>` option:
 #SBATCH -t 1:0:0              # 1 hour max for gpushort
 #SBATCH --gres=gpu:1          # Request 1 GPU
 
-# Load modules
-module load dorado
 
-# Define paths
-POD5_DIR="/gpfs/scratch/${USER}/pod5_files"
-OUTPUT_DIR="/gpfs/scratch/${USER}/basecalled"
-MODEL="dna_r10.4.1_e8.2_400bps_sup@v4.2.0"
-
-# Create output directory
-mkdir -p ${OUTPUT_DIR}
-
-# Run basecalling
-dorado basecaller ${MODEL} ${POD5_DIR} > ${OUTPUT_DIR}/calls.bam
-
-echo "Basecalling completed"
 ```
 
 ## Selecting Specific GPU Types
@@ -539,17 +526,9 @@ echo "Basecalling completed"
 #SBATCH --constraint=hopper
 ```
 
-## Checking GPU Usage
 
-SSH into your allocated node and run:
+## Full GPU Run - Need a good example for this! 
 
-```bash
-# Basic GPU monitoring
-nvidia-smi -l 1
-
-# Advanced monitoring (load module first)
-module load nvtools
-nvtop    # or nvitop
 ```
 
 ## Multiple GPUs (Whole Node)
@@ -569,44 +548,6 @@ nvtop    # or nvitop
 ⚠️ **Important:** When requesting `--exclusive`, you must also request `--mem=0` to get all available RAM.
 
 📖 **Documentation:** https://slurm-docs.hpc.qmul.ac.uk/using/usingGPU/
-
----
-
-# Quick Reference Card
-
-## Essential Commands
-
-```bash
-# Submit a job
-sbatch script.sh
-
-# Check your jobs
-squeue --me
-
-# Cancel a job
-scancel <jobid>
-
-# Check job details
-sacct -j <jobid>
-
-# Interactive session
-salloc
-```
-
-## Minimal Job Script Template
-
-```bash
-#!/bin/bash
-#SBATCH -J jobname
-#SBATCH -o %x.o%j
-#SBATCH -n 1
-#SBATCH --mem-per-cpu=4G
-#SBATCH -t 1:0:0
-
-module load <your_software>
-
-# Your commands here
-```
 
 ---
 
